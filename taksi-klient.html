@@ -311,6 +311,8 @@ function renderTariffs(){
 renderTariffs();
 
 /* ---------- map ---------- */
+let fromCoords = null;
+
 async function reverseGeocode(lat, lng){
   try{
     const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16&addressdetails=0`);
@@ -318,6 +320,30 @@ async function reverseGeocode(lat, lng){
     if(data && data.display_name){ return data.display_name; }
   }catch(e){ /* koordinata bilan qolamiz */ }
   return lat.toFixed(5) + ', ' + lng.toFixed(5);
+}
+
+async function forwardGeocode(query){
+  try{
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
+    const data = await res.json();
+    if(data && data[0]){ return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }; }
+  }catch(e){ /* topilmadi */ }
+  return null;
+}
+
+function haversineKm(a, b){
+  const R = 6371;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const s = Math.sin(dLat/2)**2 + Math.cos(a.lat*Math.PI/180) * Math.cos(b.lat*Math.PI/180) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1-s));
+}
+
+function calcPrice(distanceKm){
+  const BASE_KM = 2, BASE_PRICE = 7000, PER_KM = 3000;
+  if(distanceKm <= BASE_KM) return BASE_PRICE;
+  const extraKm = Math.ceil(distanceKm - BASE_KM);
+  return BASE_PRICE + extraKm * PER_KM;
 }
 
 function ensureMap(lat, lng, zoom){
@@ -336,6 +362,7 @@ function ensureMap(lat, lng, zoom){
 async function onMapMoveEnd(){
   if(programmaticMove){ programmaticMove = false; return; }
   const c = leafletMap.getCenter();
+  fromCoords = { lat: c.lat, lng: c.lng };
   const address = await reverseGeocode(c.lat, c.lng);
   fromEl.value = address;
   mapBadge.textContent = address.split(',')[0];
@@ -354,6 +381,7 @@ async function locateMe(){
   locateMsg.textContent = "Aniqlanmoqda...";
   navigator.geolocation.getCurrentPosition(async (pos) => {
     const { latitude, longitude } = pos.coords;
+    fromCoords = { lat: latitude, lng: longitude };
     ensureMap(latitude, longitude, 16);
     const address = await reverseGeocode(latitude, longitude);
     fromEl.value = address;
@@ -410,6 +438,7 @@ function renderTicket(order){
   const st = STATUS[order.status] || STATUS.waiting;
   const div = document.createElement('div');
   div.className = 'ticket';
+  const priceLine = order.price ? `<div class="meta">Taxminiy narx: <b>${order.price.toLocaleString('ru-RU')} so'm</b> (${order.distanceKm} km) — haydovchiga naqd to'lanadi</div>` : '';
   div.innerHTML = `
     <div class="top">
       <div class="name">${order.name || 'Mehmon'}</div>
@@ -421,6 +450,7 @@ function renderTicket(order){
       <div class="to">${order.to}</div>
     </div>
     <div class="meta">Buyurtma vaqti: ${fmtTime(order.createdAt)} · ${order.phone}</div>
+    ${priceLine}
   `;
   return div;
 }
@@ -452,17 +482,31 @@ async function submitOrder(){
   }
   msgEl.textContent = "";
   btn.disabled = true;
+  btn.textContent = "Narx hisoblanmoqda...";
+
+  let distanceKm = null;
+  let price = null;
+  try{
+    let fc = fromCoords;
+    if(!fc){ fc = await forwardGeocode(from); }
+    const tc = await forwardGeocode(to);
+    if(fc && tc){
+      distanceKm = Math.round(haversineKm(fc, tc) * 10) / 10;
+      price = calcPrice(distanceKm);
+    }
+  }catch(e){ /* masofa aniqlanmadi, narxsiz davom etamiz */ }
+
   btn.textContent = "Yuborilmoqda...";
 
   const id = 'o' + Date.now() + Math.random().toString(36).slice(2,7);
-  const order = { id, name, phone, from, to, tariff: selectedTariff, status: 'waiting', createdAt: Date.now() };
+  const order = { id, name, phone, from, to, tariff: selectedTariff, distanceKm, price, status: 'waiting', createdAt: Date.now() };
 
   try{
     await ordersCol.doc(id).set(order);
     myOrderIds.unshift(id);
     saveMyIds();
     await renderOrders();
-    fromEl.value = ''; toEl.value = '';
+    fromEl.value = ''; toEl.value = ''; fromCoords = null;
   }catch(e){
     msgEl.textContent = "Xatolik: " + (e && e.message ? e.message : "ma'lumotlar bazasiga ulanmadi");
   }

@@ -80,6 +80,29 @@ body{margin:0;background:var(--sand);color:var(--ink);font-family:'Manrope',sans
 .act-enroute{ background:var(--teal); }
 .act-done{ background:var(--green); }
 .act-cancel{ background:transparent; color:var(--red); border:1.5px solid var(--red); }
+
+.tabbar{ display:flex; gap:8px; padding:0 32px 14px; background:var(--sand); }
+.tab-btn{ padding:9px 18px; border-radius:20px; border:1.5px solid var(--line); background:var(--card); font-family:'Manrope',sans-serif; font-size:13px; font-weight:600; color:var(--ink-soft); cursor:pointer; }
+.tab-btn.active{ background:var(--asphalt); border-color:var(--asphalt); color:var(--yellow); }
+
+.dcard{ background:var(--card); border-radius:16px; padding:18px 22px; margin-bottom:14px; box-shadow:0 2px 10px rgba(28,30,36,0.06); display:flex; gap:18px; align-items:center; flex-wrap:wrap; }
+.dcard .who{ min-width:150px; }
+.dcard .who .name{ font-weight:700; font-size:14.5px; }
+.dcard .who .phone{ font-size:12.5px; color:var(--ink-soft); margin-top:2px; }
+.dcard .rankwrap{ display:flex; flex-direction:column; gap:4px; }
+.dcard .rankwrap label{ font-size:10.5px; color:var(--ink-soft); }
+.dcard select{ padding:7px 10px; border-radius:10px; border:1.5px solid var(--line); font-family:'Manrope',sans-serif; font-size:13px; background:#FCFBF8; }
+.dcard .balwrap{ display:flex; flex-direction:column; gap:4px; align-items:flex-end; margin-left:auto; }
+.dcard .balwrap .amt{ font-family:'Oswald',sans-serif; font-size:16px; font-weight:600; }
+.dcard .balwrap .lbl{ font-size:10.5px; color:var(--ink-soft); }
+.dcard .topup-btn{ border:none; border-radius:10px; padding:7px 12px; font-size:12px; font-family:'Manrope',sans-serif; font-weight:600; cursor:pointer; color:#fff; background:var(--green); }
+.dstatus{ font-size:11px; font-weight:700; padding:4px 10px; border-radius:20px; color:#fff; display:inline-block; margin-bottom:6px; }
+.ds-pending{ background:var(--yellow); color:var(--asphalt); }
+.ds-active{ background:var(--green); }
+.ds-blocked{ background:var(--red); }
+.dcard .statuswrap{ display:flex; flex-direction:column; gap:6px; }
+.dcard .approve-btn{ border:none; border-radius:10px; padding:7px 12px; font-size:12px; font-family:'Manrope',sans-serif; font-weight:600; cursor:pointer; color:#fff; background:var(--teal-light); }
+.dcard .block-btn{ border:none; border-radius:10px; padding:7px 12px; font-size:12px; font-family:'Manrope',sans-serif; font-weight:600; cursor:pointer; color:var(--red); background:transparent; border:1.5px solid var(--red); }
 </style>
 </head>
 <body>
@@ -92,10 +115,16 @@ body{margin:0;background:var(--sand);color:var(--ink);font-family:'Manrope',sans
   </div>
 </div>
 
+<div class="tabbar">
+  <button class="tab-btn active" id="tabOrders">Buyurtmalar</button>
+  <button class="tab-btn" id="tabDrivers">Haydovchilar</button>
+</div>
+
 <div class="filters" id="filters"></div>
 
 <div class="content">
   <div id="list"></div>
+  <div id="driversList" style="display:none;"></div>
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
@@ -112,6 +141,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const ordersCol = db.collection('orders');
+const driversCol = db.collection('drivers');
 
 const STATUS = {
   waiting:   { label: "Kutilmoqda",     cls: "b-waiting" },
@@ -192,7 +222,8 @@ function renderCard(order){
 
   const who = document.createElement('div');
   who.className = 'who';
-  who.innerHTML = `<div class="name">${order.name}</div><div class="phone">${order.phone}</div>`;
+  const driverLine = order.driverCarNumber ? `<div class="phone" style="margin-top:4px;">🚗 ${order.driverCarModel || ''} · ${order.driverCarNumber}</div>` : '';
+  who.innerHTML = `<div class="name">${order.name}</div><div class="phone">${order.phone}</div>${driverLine}`;
 
   const route = document.createElement('div');
   route.className = 'route';
@@ -248,10 +279,143 @@ function startListening(){
   });
 }
 
+/* ---------- drivers ---------- */
+const tabOrdersBtn = document.getElementById('tabOrders');
+const tabDriversBtn = document.getElementById('tabDrivers');
+const driversListEl = document.getElementById('driversList');
+let drivers = [];
+
+tabOrdersBtn.addEventListener('click', () => {
+  tabOrdersBtn.classList.add('active');
+  tabDriversBtn.classList.remove('active');
+  filtersEl.style.display = 'flex';
+  listEl.style.display = 'block';
+  driversListEl.style.display = 'none';
+});
+tabDriversBtn.addEventListener('click', () => {
+  tabDriversBtn.classList.add('active');
+  tabOrdersBtn.classList.remove('active');
+  filtersEl.style.display = 'none';
+  listEl.style.display = 'none';
+  driversListEl.style.display = 'block';
+});
+
+async function setDriverRank(id, rank){
+  try{ await driversCol.doc(id).update({ rank: Number(rank) }); }
+  catch(e){ alert('Xatolik: ' + e.message); }
+}
+
+async function topUpDriver(id, currentBalance){
+  const input = prompt("Qo'shiladigan summani kiriting (so'm):", "10000");
+  if(input === null) return;
+  const amount = Number(input);
+  if(!amount || amount <= 0){ alert("Noto'g'ri summa"); return; }
+  try{
+    await driversCol.doc(id).update({ balance: (currentBalance || 0) + amount });
+  }catch(e){ alert('Xatolik: ' + e.message); }
+}
+
+async function setDriverStatus(id, status){
+  try{ await driversCol.doc(id).update({ status }); }
+  catch(e){ alert('Xatolik: ' + e.message); }
+}
+
+const DRIVER_STATUS = {
+  pending: { label: "Tasdiqlanmagan", cls: "ds-pending" },
+  active:  { label: "Faol",           cls: "ds-active" },
+  blocked: { label: "Bloklangan",     cls: "ds-blocked" },
+};
+
+function renderDriverCard(d){
+  const card = document.createElement('div');
+  card.className = 'dcard';
+  const status = d.status || 'pending';
+  const ds = DRIVER_STATUS[status] || DRIVER_STATUS.pending;
+
+  const who = document.createElement('div');
+  who.className = 'who';
+  who.innerHTML = `<div class="dstatus ${ds.cls}">${ds.label}</div><div class="name">${d.carModel || '—'}</div><div class="phone">${d.carNumber || ''} · ${d.phone}</div>`;
+
+  const rankwrap = document.createElement('div');
+  rankwrap.className = 'rankwrap';
+  const rankLabel = document.createElement('label');
+  rankLabel.textContent = 'Razryad';
+  const select = document.createElement('select');
+  for(let i = 1; i <= 10; i++){
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = i;
+    if((d.rank || 1) === i) opt.selected = true;
+    select.appendChild(opt);
+  }
+  select.addEventListener('change', () => setDriverRank(d.id, select.value));
+  rankwrap.appendChild(rankLabel);
+  rankwrap.appendChild(select);
+
+  const statuswrap = document.createElement('div');
+  statuswrap.className = 'statuswrap';
+  if(status !== 'active'){
+    const approveBtn = document.createElement('button');
+    approveBtn.className = 'approve-btn';
+    approveBtn.textContent = 'Tasdiqlash';
+    approveBtn.addEventListener('click', () => setDriverStatus(d.id, 'active'));
+    statuswrap.appendChild(approveBtn);
+  }
+  if(status !== 'blocked'){
+    const blockBtn = document.createElement('button');
+    blockBtn.className = 'block-btn';
+    blockBtn.textContent = 'Bloklash';
+    blockBtn.addEventListener('click', () => setDriverStatus(d.id, 'blocked'));
+    statuswrap.appendChild(blockBtn);
+  } else {
+    const unblockBtn = document.createElement('button');
+    unblockBtn.className = 'approve-btn';
+    unblockBtn.textContent = 'Blokdan chiqarish';
+    unblockBtn.addEventListener('click', () => setDriverStatus(d.id, 'active'));
+    statuswrap.appendChild(unblockBtn);
+  }
+
+  const balwrap = document.createElement('div');
+  balwrap.className = 'balwrap';
+  balwrap.innerHTML = `<div class="amt">${(d.balance || 0).toLocaleString('ru-RU')} so'm</div><div class="lbl">balans</div>`;
+  const topupBtn = document.createElement('button');
+  topupBtn.className = 'topup-btn';
+  topupBtn.textContent = "To'ldirish";
+  topupBtn.addEventListener('click', () => topUpDriver(d.id, d.balance));
+  balwrap.appendChild(topupBtn);
+
+  card.appendChild(who);
+  card.appendChild(rankwrap);
+  card.appendChild(statuswrap);
+  card.appendChild(balwrap);
+  return card;
+}
+
+function renderDrivers(){
+  driversListEl.innerHTML = '';
+  if(drivers.length === 0){
+    driversListEl.innerHTML = '<div class="empty">Hozircha haydovchilar yo\'q</div>';
+    return;
+  }
+  const sorted = [...drivers].sort((a,b) => (b.createdAt || 0) - (a.createdAt || 0));
+  sorted.forEach(d => driversListEl.appendChild(renderDriverCard(d)));
+}
+
+function startListeningDrivers(){
+  driversCol.onSnapshot((snapshot) => {
+    drivers = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderDrivers();
+  }, (e) => {
+    console.error('haydovchilarni yuklashda xatolik', e);
+    driversListEl.innerHTML = '<div class="empty">Ma\'lumotlar bazasiga ulanmadi</div>';
+  });
+}
+
 (async function init(){
   renderFilters();
   renderList();
   startListening();
+  startListeningDrivers();
 })();
 </script>
 </body>
