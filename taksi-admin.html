@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boshqaruv paneli — Taksi buyurtmalari</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap');
+
+:root{
+  --asphalt:#1C1E24;
+  --asphalt-2:#292C34;
+  --sand:#EFEAE0;
+  --card:#FFFFFF;
+  --yellow:#F2B705;
+  --teal:#114B5F;
+  --teal-light:#1C7C93;
+  --green:#3E7C4A;
+  --red:#C1440E;
+  --ink:#22252B;
+  --ink-soft:#6B6E76;
+  --line:#E2DDD0;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--sand);color:var(--ink);font-family:'Manrope',sans-serif;-webkit-font-smoothing:antialiased;}
+
+.topbar{
+  background:var(--asphalt); color:#fff; padding:20px 32px;
+  display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;
+}
+.topbar .title{font-family:'Oswald',sans-serif;font-weight:700;font-size:20px;}
+.topbar .title span{color:var(--yellow);}
+.stats{display:flex;gap:22px;}
+.stat{text-align:right;}
+.stat .num{font-family:'Oswald',sans-serif;font-size:20px;font-weight:600;}
+.stat .lbl{font-size:11px;color:#B7B9BF;}
+
+.filters{
+  display:flex; gap:8px; padding:16px 32px; flex-wrap:wrap;
+  background:var(--sand); border-bottom:1px solid var(--line);
+}
+.filter-btn{
+  padding:8px 14px; border-radius:20px; border:1.5px solid var(--line); background:var(--card);
+  font-family:'Manrope',sans-serif; font-size:12.5px; color:var(--ink-soft); cursor:pointer;
+}
+.filter-btn.active{ background:var(--asphalt); border-color:var(--asphalt); color:var(--yellow); }
+
+.content{ padding:22px 32px 50px; max-width:920px; margin:0 auto; }
+.empty{ color:var(--ink-soft); font-size:14px; padding:40px 0; text-align:center; }
+
+.card{
+  background:var(--card); border-radius:16px; padding:18px 22px; margin-bottom:14px;
+  box-shadow:0 2px 10px rgba(28,30,36,0.06); display:flex; gap:20px; align-items:center; flex-wrap:wrap;
+}
+.card .who{ min-width:150px; }
+.card .who .name{ font-weight:700; font-size:14.5px; }
+.card .who .phone{ font-size:12.5px; color:var(--ink-soft); margin-top:2px; }
+
+.card .route{ flex:1; min-width:200px; display:flex; align-items:center; gap:10px; font-size:14px; }
+.card .route .point{ flex:1; }
+.card .route .point .lbl{ font-size:10.5px; color:var(--ink-soft); margin-bottom:2px; }
+.card .route .arrow{ color:var(--ink-soft); }
+
+.card .side{ display:flex; flex-direction:column; align-items:flex-end; gap:8px; min-width:150px; }
+.card .time{ font-size:11.5px; color:var(--ink-soft); }
+
+.badge{ font-size:11.5px; font-weight:600; padding:5px 12px; border-radius:20px; color:#fff; white-space:nowrap; }
+.b-waiting{background:var(--yellow); color:var(--asphalt);}
+.b-accepted{background:var(--teal-light);}
+.b-enroute{background:var(--teal);}
+.b-done{background:var(--green);}
+.b-cancelled{background:var(--red);}
+
+.actions{ display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+.act-btn{
+  border:none; border-radius:10px; padding:7px 12px; font-size:12px; font-family:'Manrope',sans-serif;
+  font-weight:600; cursor:pointer; color:#fff;
+}
+.act-accept{ background:var(--teal-light); }
+.act-enroute{ background:var(--teal); }
+.act-done{ background:var(--green); }
+.act-cancel{ background:transparent; color:var(--red); border:1.5px solid var(--red); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="title">BOSHQARUV <span>PANELI</span></div>
+  <div class="stats">
+    <div class="stat"><div class="num" id="statWaiting">0</div><div class="lbl">Kutilmoqda</div></div>
+    <div class="stat"><div class="num" id="statActive">0</div><div class="lbl">Jarayonda</div></div>
+    <div class="stat"><div class="num" id="statDone">0</div><div class="lbl">Bajarilgan</div></div>
+  </div>
+</div>
+
+<div class="filters" id="filters"></div>
+
+<div class="content">
+  <div id="list"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyBzVUxZN6wbtxABFZMSOXWW2Hpx2-x6VAI",
+  authDomain: "qulay-taksi.firebaseapp.com",
+  projectId: "qulay-taksi",
+  storageBucket: "qulay-taksi.firebasestorage.app",
+  messagingSenderId: "455982111000",
+  appId: "1:455982111000:web:6e643b10c878126afae66d"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const ordersCol = db.collection('orders');
+
+const STATUS = {
+  waiting:   { label: "Kutilmoqda",     cls: "b-waiting" },
+  accepted:  { label: "Qabul qilindi",  cls: "b-accepted" },
+  enroute:   { label: "Yo'lda",         cls: "b-enroute" },
+  done:      { label: "Bajarildi",      cls: "b-done" },
+  cancelled: { label: "Bekor qilindi",  cls: "b-cancelled" },
+};
+
+const FILTERS = [
+  { key: 'all', label: 'Barchasi' },
+  { key: 'waiting', label: 'Kutilmoqda' },
+  { key: 'accepted', label: 'Qabul qilindi' },
+  { key: 'enroute', label: "Yo'lda" },
+  { key: 'done', label: 'Bajarildi' },
+  { key: 'cancelled', label: 'Bekor qilindi' },
+];
+
+let currentFilter = 'all';
+let orders = [];
+
+const filtersEl = document.getElementById('filters');
+const listEl = document.getElementById('list');
+
+function renderFilters(){
+  filtersEl.innerHTML = '';
+  FILTERS.forEach(f => {
+    const b = document.createElement('button');
+    b.className = 'filter-btn' + (f.key === currentFilter ? ' active' : '');
+    b.textContent = f.label;
+    b.addEventListener('click', () => { currentFilter = f.key; renderFilters(); renderList(); });
+    filtersEl.appendChild(b);
+  });
+}
+
+function fmtTime(ts){
+  const d = new Date(ts);
+  return d.getHours().toString().padStart(2,'0') + ":" + d.getMinutes().toString().padStart(2,'0');
+}
+
+async function updateStatus(id, status){
+  const order = orders.find(o => o.id === id);
+  if(!order) return;
+  order.status = status;
+  try{
+    await ordersCol.doc(id).update({ status });
+  }catch(e){ console.error('yangilashda xatolik', e); }
+  renderList();
+}
+
+function actionsFor(order){
+  const wrap = document.createElement('div');
+  wrap.className = 'actions';
+  if(order.status === 'waiting'){
+    wrap.appendChild(mkBtn('Qabul qilish', 'act-accept', () => updateStatus(order.id, 'accepted')));
+    wrap.appendChild(mkBtn('Bekor qilish', 'act-cancel', () => updateStatus(order.id, 'cancelled')));
+  } else if(order.status === 'accepted'){
+    wrap.appendChild(mkBtn("Yo'lga chiqish", 'act-enroute', () => updateStatus(order.id, 'enroute')));
+    wrap.appendChild(mkBtn('Bekor qilish', 'act-cancel', () => updateStatus(order.id, 'cancelled')));
+  } else if(order.status === 'enroute'){
+    wrap.appendChild(mkBtn('Yakunlash', 'act-done', () => updateStatus(order.id, 'done')));
+  }
+  return wrap;
+}
+
+function mkBtn(label, cls, onClick){
+  const b = document.createElement('button');
+  b.className = 'act-btn ' + cls;
+  b.textContent = label;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function renderCard(order){
+  const st = STATUS[order.status] || STATUS.waiting;
+  const card = document.createElement('div');
+  card.className = 'card';
+
+  const who = document.createElement('div');
+  who.className = 'who';
+  who.innerHTML = `<div class="name">${order.name}</div><div class="phone">${order.phone}</div>`;
+
+  const route = document.createElement('div');
+  route.className = 'route';
+  route.innerHTML = `
+    <div class="point"><div class="lbl">Qayerdan</div>${order.from}</div>
+    <div class="arrow">→</div>
+    <div class="point"><div class="lbl">Qayerga</div>${order.to}</div>
+  `;
+
+  const side = document.createElement('div');
+  side.className = 'side';
+  const time = document.createElement('div');
+  time.className = 'time';
+  time.textContent = fmtTime(order.createdAt);
+  const badge = document.createElement('div');
+  badge.className = 'badge ' + st.cls;
+  badge.textContent = st.label;
+  side.appendChild(time);
+  side.appendChild(badge);
+  side.appendChild(actionsFor(order));
+
+  card.appendChild(who);
+  card.appendChild(route);
+  card.appendChild(side);
+  return card;
+}
+
+function renderStats(){
+  document.getElementById('statWaiting').textContent = orders.filter(o => o.status === 'waiting').length;
+  document.getElementById('statActive').textContent = orders.filter(o => o.status === 'accepted' || o.status === 'enroute').length;
+  document.getElementById('statDone').textContent = orders.filter(o => o.status === 'done').length;
+}
+
+function renderList(){
+  renderStats();
+  const filtered = currentFilter === 'all' ? orders : orders.filter(o => o.status === currentFilter);
+  const sorted = [...filtered].sort((a,b) => b.createdAt - a.createdAt);
+  listEl.innerHTML = '';
+  if(sorted.length === 0){
+    listEl.innerHTML = '<div class="empty">Buyurtmalar topilmadi</div>';
+    return;
+  }
+  sorted.forEach(o => listEl.appendChild(renderCard(o)));
+}
+
+function startListening(){
+  ordersCol.onSnapshot((snapshot) => {
+    orders = snapshot.docs.map(d => d.data());
+    renderList();
+  }, (e) => {
+    console.error('yuklashda xatolik', e);
+    listEl.innerHTML = '<div class="empty">Ma\'lumotlar bazasiga ulanmadi</div>';
+  });
+}
+
+(async function init(){
+  renderFilters();
+  renderList();
+  startListening();
+})();
+</script>
+</body>
+</html>
